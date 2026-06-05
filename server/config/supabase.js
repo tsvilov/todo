@@ -5,4 +5,4 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-module.exports = { supabaseAdmin, SUPABASE_URL }
+module.exports = { supabaseAdmin, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY }

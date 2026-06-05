@@ -1,18 +1,72 @@
-const { supabaseAdmin } = require('../config/supabase')
+const { supabaseAdmin, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = require('../config/supabase')
 const fetch = global.fetch
 const { createResetToken, verifyResetToken } = require('../services/tokenService')
 const { sendResetEmail } = require('../services/emailService')
-const { SUPABASE_URL } = require('../config/supabase')
 
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true'
+
+async function fetchSupabaseToken(email, password) {
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    },
+    body: JSON.stringify({ email, password })
+  })
+  const json = await resp.json()
+  if (!resp.ok) {
+    const error = json.error || json.msg || json.message || 'Invalid login credentials'
+    const status = resp.status || 400
+    const err = new Error(error)
+    err.status = status
+    err.body = json
+    throw err
+  }
+  return json
+}
+
+function setAuthCookies(res, json) {
+  const maxAge = (json.expires_in || 3600) * 1000
+  res.cookie('access_token', json.access_token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', maxAge })
+  if (json.refresh_token) {
+    res.cookie('refresh_token', json.refresh_token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 })
+  }
+}
 
 async function signup(req, res, next) {
   try {
     const { email, password } = req.body
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true })
-    if (error) return res.status(400).json({ error: error.message })
-    res.json({ user: data.user })
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({ error: 'Supabase configuration is missing' })
+    }
+
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({ email, password, email_confirm: true })
+    })
+
+    const json = await resp.json()
+    if (!resp.ok) {
+      console.error('Supabase admin createUser failed:', resp.status, json)
+      return res.status(resp.status).json({ error: json.error || json.msg || json.message || 'Unable to create user' })
+    }
+
+    const tokenJson = await fetchSupabaseToken(email, password)
+    setAuthCookies(res, tokenJson)
+    const { data: userData } = await supabaseAdmin.auth.getUser(tokenJson.access_token)
+    res.json({ user: userData.user })
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, details: err.body })
+    }
     next(err)
   }
 }
@@ -20,34 +74,20 @@ async function signup(req, res, next) {
 async function login(req, res, next) {
   try {
     const { email, password } = req.body
-    const params = new URLSearchParams()
-    params.append('grant_type', 'password')
-    params.append('email', email)
-    params.append('password', password)
-
-    const resp = await fetch(`${SUPABASE_URL}/auth/v1/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-      },
-      body: params.toString()
-    })
-    const json = await resp.json()
-    if (!resp.ok) return res.status(resp.status).json(json)
-    // set tokens as httpOnly cookies
-    const maxAge = (json.expires_in || 3600) * 1000
-    res.cookie('access_token', json.access_token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', maxAge })
-    if (json.refresh_token) {
-      // refresh token longer expiry (30 days)
-      res.cookie('refresh_token', json.refresh_token, { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 })
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({ error: 'Supabase configuration is missing' })
     }
 
-    // fetch user from access token and return minimal user info
+    const json = await fetchSupabaseToken(email, password)
+    setAuthCookies(res, json)
+
     const { data: userData } = await supabaseAdmin.auth.getUser(json.access_token)
     res.json({ user: userData.user })
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message, details: err.body })
+    }
     next(err)
   }
 }

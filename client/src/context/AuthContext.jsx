@@ -23,20 +23,27 @@ export function AuthProvider({ children }) {
   }, [])
 
   const login = async (email, password) => {
-    // server sets httpOnly cookies; client doesn't store tokens
-    await api.post('/api/auth/login', { email, password })
-    const res = await api.get('/api/auth/me')
-    setUser(res.data.user || null)
-    return res.data
+    try {
+      await api.post('/api/auth/login', { email, password })
+      const res = await api.get('/api/auth/me')
+      setUser(res.data.user || null)
+      return res.data
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Login failed'
+      throw new Error(message)
+    }
   }
 
   const signup = async (email, password) => {
-    await api.post('/api/auth/signup', { email, password })
-    // after signup, optionally log the user in
-    const res = await api.post('/api/auth/login', { email, password })
-    const me = await api.get('/api/auth/me')
-    setUser(me.data.user || null)
-    return me.data
+    try {
+      await api.post('/api/auth/signup', { email, password })
+      const me = await api.get('/api/auth/me')
+      setUser(me.data.user || null)
+      return me.data
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Signup failed'
+      throw new Error(message)
+    }
   }
 
   const logout = async () => {
@@ -45,11 +52,21 @@ export function AuthProvider({ children }) {
   }
 
   const forgotPassword = async (email) => {
-    await api.post('/api/auth/forgot', { email })
+    try {
+      await api.post('/api/auth/forgot', { email })
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Forgot password request failed'
+      throw new Error(message)
+    }
   }
 
   const resetPassword = async (token, password) => {
-    await api.post('/api/auth/reset', { token, password })
+    try {
+      await api.post('/api/auth/reset', { token, password })
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || 'Reset password request failed'
+      throw new Error(message)
+    }
   }
 
   return (
